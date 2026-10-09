@@ -1,0 +1,24 @@
+{
+  "name": "catalyst-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "bun scripts/demo.ts",
+    "build": "bun build --target=bun --production --outdir=dist src/server.ts",
+    "start": "bun scripts/demo.ts --production",
+    "typecheck": "tsc --noEmit",
+    "format:check": "prettier --check .",
+    "test": "bun test tests/*.test.ts",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@solana/addresses": "8.4.0",
+    "lossless-json": "4.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/bun": "1.4.2",
+    "prettier": "3.9.9",
+    "typescript": "7.0.2"
+  }
+}

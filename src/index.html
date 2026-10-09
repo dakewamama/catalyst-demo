@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Inspect Solana authorization through verified native fixtures and their evidence."
+    />
+    <title>Catalyst | Authority explorer</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">catalyst<span> / velon</span></a>
+      <div class="header-links">
+        <span class="badge">Native fixture replay</span
+        ><a href="https://github.com/dakewamama/catalyst-demo">GitHub ↗</a>
+      </div>
+    </header>
+    <main>
+      <section class="intro">
+        <p class="eyebrow">Solana authorization</p>
+        <h1>Who can act on this account?</h1>
+        <p class="lead">Inspect permissions, their limits and the evidence behind them.</p>
+        <p class="scope-note">
+          This replay uses accounts captured from executed native tests. Coverage is partial. Every result is
+          tied to an observed state.
+        </p>
+      </section>
+      <section class="search-panel" aria-label="Scan an address">
+        <label for="scenario">Native evidence</label>
+        <select id="scenario" disabled>
+          <option>Loading observations...</option>
+        </select>
+        <form id="scan-form">
+          <label for="address">Solana address</label>
+          <div class="search-row">
+            <input
+              id="address"
+              name="address"
+              placeholder="Paste a wallet, token account or authority address"
+              autocomplete="off"
+              spellcheck="false"
+              required
+            /><button id="scan" type="submit" disabled>Scan</button>
+          </div>
+        </form>
+        <div class="examples" id="examples" aria-label="Fixture addresses"></div>
+      </section>
+      <nav class="tabs" aria-label="Explorer views">
+        <button id="scan-tab" class="selected" type="button">Scan</button>
+        <button id="diff-tab" type="button">Observed Diff</button>
+      </nav>
+      <div id="notice" role="status" aria-live="polite"></div>
+      <section id="results" aria-label="Authorization results"></section>
+      <section id="detail" hidden aria-label="Authorization detail"></section>
+      <section id="diff" hidden aria-label="Observed authorization changes"></section>
+    </main>
+    <footer>
+      ARM 0.1 · Native enforcement · Evidence retained
+      <span>Read-only replay. No wallet or signing required.</span>
+    </footer>
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>
