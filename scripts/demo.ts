@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { array, grants, object, publicKey, readJson, text } from "../src/wire.ts";
 
-const CATALOGER_REVISION = "24b8fc6b68b7cd352786c7995472dcaec9a4ab9c";
+const CATALOGER_REVISION = "b5c3c4adfe607acaf40d611a34e7265c34f93898";
 const root = resolve(import.meta.dir, "..");
 const cataloger = resolve(process.env.CATALOGER_DIR ?? `${root}/../cataloger`);
 const data = `${root}/.data`;
@@ -21,7 +21,7 @@ if (command(["git", "rev-parse", "HEAD"]).trim() !== CATALOGER_REVISION)
 command(["git", "diff", "--quiet", "HEAD"]);
 command(["cargo", "build", "--locked", "-p", "catalyst-indexer", "--bin", "authorization-api"]);
 const binary = `${resolve(cataloger, process.env.CARGO_TARGET_DIR ?? "target")}/debug/authorization-api`;
-const env = { ...process.env, DATABASE_URL: `sqlite://${data}/observations.db` };
+const env = { ...process.env, DATABASE_URL: `sqlite://${data}/observations-${CATALOGER_REVISION}.db` };
 const fixtures = `${cataloger}/services/catalyst-indexer/tests/fixtures`;
 const definitions = [
   { name: "Subscriptions", files: ["owner-pull-60.json", "revoke-cancelled-after.json"] },

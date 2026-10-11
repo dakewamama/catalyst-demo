@@ -15,7 +15,7 @@ Requirements: Bun 1.3.14 or newer, Node 22, npm, Git and stable Rust.
 
 ```sh
 git clone https://github.com/dakewamama/cataloger.git ../cataloger
-git -C ../cataloger checkout 24b8fc6b68b7cd352786c7995472dcaec9a4ab9c
+git -C ../cataloger checkout b5c3c4adfe607acaf40d611a34e7265c34f93898
 npm ci --ignore-scripts
 bun run demo
 ```
@@ -23,7 +23,9 @@ bun run demo
 Open `http://127.0.0.1:3000`. For an existing checkout, set
 `CATALOGER_DIR=/absolute/path/to/cataloger`. Its tracked files must match the pinned
 revision. The first run builds `authorization-api`; later builds reuse Cargo's cache.
-The local SQLite journal lives in ignored `.data/`. No RPC credential is required.
+The local fixture journal lives in ignored `.data/observations-{cataloger_revision}.db`.
+Each runtime pin gets its own journal so older projection evidence remains intact.
+No RPC credential is required for fixture replay.
 `PORT` and `RUNTIME_PORT` select the browser and observation API ports respectively.
 Both bind to localhost by default. `HOST` changes only the browser server's bind address.
 
@@ -77,9 +79,31 @@ removed derived authority, evidence inspection, partial coverage, invalid input,
 empty results, provider failure and conflicting/unsupported observations. Screenshots
 and traces remain under ignored `test-results/`.
 
+## Revoke API bridge
+
+The browser server forwards these existing Cataloger routes:
+
+- `POST /api/snapshots/{id}/actions/revoke/{token_account}` requests simulation.
+- `POST /api/snapshots/{id}/actions/revoke/{token_account}/verify` forwards the
+  signed transaction for finalized verification and native reobservation.
+- `GET /api/verifications/revoke/{verification_id}` retrieves retained evidence.
+
+POST requests require `X-Velon-Action: revoke`. Simulation accepts no body;
+verification requires `application/json` containing `signed_transaction`, as defined
+by Cataloger. Request bodies are limited to 4096 bytes. The server preserves raw
+response bytes and status codes, rejects query strings and redirects, and never sends
+transactions or forwards browser credentials. The action header prevents cross-origin
+browser requests without preflight; it is not client authentication.
+
+Set `RPC_URL` for Cataloger's action endpoints. They remain unavailable without it.
+The imported fixtures alone do not establish live authority. Cataloger still requires
+verified deployment/runtime evidence and current state before returning signing bytes.
+A 404 during finalization remains pending or absent, not a successful revocation.
+Wallet controls and finalization polling are not wired into the browser yet.
+
 ## Scope
 
-This is a read-only native fixture replay. Live code identity is independently
+The browser remains a read-only native fixture replay. Live code identity is independently
 verified in the SDK/runtime, but the showcased grant accounts are local executable
 fixtures. Wallet execution, transaction simulation Diff, continuous indexing,
 Squads, Swig and exact intent compilation are still separate milestones. No claim
