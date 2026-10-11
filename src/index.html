@@ -7,12 +7,12 @@
       name="description"
       content="Inspect Solana authorization through verified native fixtures and their evidence."
     />
-    <title>Catalyst | Authority explorer</title>
+    <title>Velon | My permissions</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/">catalyst<span> / velon</span></a>
+      <a class="brand" href="/">velon<span> / my permissions</span></a>
       <div class="header-links">
         <span class="badge">Native fixture replay</span
         ><a href="https://github.com/dakewamama/catalyst-demo">GitHub ↗</a>
@@ -21,12 +21,20 @@
     <main>
       <section class="intro">
         <p class="eyebrow">Solana authorization</p>
-        <h1>Who can act on this account?</h1>
+        <h1>Who can act on this wallet?</h1>
         <p class="lead">Inspect permissions, their limits and the evidence behind them.</p>
         <p class="scope-note">
           This replay uses accounts captured from executed native tests. Coverage is partial. Every result is
           tied to an observed state.
         </p>
+      </section>
+      <section class="wallet-panel" aria-label="Wallet connection">
+        <label for="wallet-choice">Wallet</label>
+        <select id="wallet-choice">
+          <option>No signing wallet detected</option>
+        </select>
+        <button id="connect-wallet" type="button">Connect wallet</button>
+        <p id="wallet-status" class="address" role="status">Connect to review your own permissions.</p>
       </section>
       <section class="search-panel" aria-label="Scan an address">
         <label for="scenario">Native evidence</label>
@@ -53,13 +61,15 @@
         <button id="diff-tab" type="button">Observed Diff</button>
       </nav>
       <div id="notice" role="status" aria-live="polite"></div>
+      <section id="action-result" aria-live="polite" hidden></section>
       <section id="results" aria-label="Authorization results"></section>
       <section id="detail" hidden aria-label="Authorization detail"></section>
       <section id="diff" hidden aria-label="Observed authorization changes"></section>
     </main>
+    <dialog id="revoke-review" aria-label="Review revoke"></dialog>
     <footer>
-      ARM 0.1 · Native enforcement · Evidence retained
-      <span>Read-only replay. No wallet or signing required.</span>
+      Native permissions · Evidence retained
+      <span>Fixture replay stays read-only. Wallet actions require verified live evidence.</span>
     </footer>
     <script type="module" src="./app.ts"></script>
   </body>

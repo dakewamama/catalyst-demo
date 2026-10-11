@@ -13,6 +13,14 @@
   },
   "dependencies": {
     "@solana/addresses": "8.4.0",
+    "@solana/rpc": "8.4.0",
+    "@solana/rpc-types": "8.4.0",
+    "@solana/transaction-messages": "8.4.0",
+    "@solana/transactions": "8.4.0",
+    "@solana/wallet-standard-features": "1.5.0",
+    "@wallet-standard/app": "1.1.1",
+    "@wallet-standard/features": "1.1.1",
+    "catalyst-sdk": "git+https://github.com/dakewamama/catalyst-sdk.git#bdd9e865882c663598b271c45922492c8e3de251",
     "lossless-json": "4.3.1"
   },
   "devDependencies": {

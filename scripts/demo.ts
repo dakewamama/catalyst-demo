@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { array, grants, object, publicKey, readJson, text } from "../src/wire.ts";
+import { DEVNET_GENESIS, type Control } from "../src/control.ts";
 
 const CATALOGER_REVISION = "b5c3c4adfe607acaf40d611a34e7265c34f93898";
 const root = resolve(import.meta.dir, "..");
@@ -21,7 +22,10 @@ if (command(["git", "rev-parse", "HEAD"]).trim() !== CATALOGER_REVISION)
 command(["git", "diff", "--quiet", "HEAD"]);
 command(["cargo", "build", "--locked", "-p", "catalyst-indexer", "--bin", "authorization-api"]);
 const binary = `${resolve(cataloger, process.env.CARGO_TARGET_DIR ?? "target")}/debug/authorization-api`;
-const env = { ...process.env, DATABASE_URL: `sqlite://${data}/observations-${CATALOGER_REVISION}.db` };
+const env = {
+  ...process.env,
+  DATABASE_URL: process.env.DATABASE_URL ?? `sqlite://${data}/observations-${CATALOGER_REVISION}.db`,
+};
 const fixtures = `${cataloger}/services/catalyst-indexer/tests/fixtures`;
 const definitions = [
   { name: "Subscriptions", files: ["owner-pull-60.json", "revoke-cancelled-after.json"] },
@@ -55,6 +59,37 @@ const scenarios = definitions.map(({ name, files }) => {
   }));
   return { name, scope: text(latest.scope_id), snapshots, examples };
 });
+
+let control: Control | null = null;
+if (process.env.LIVE_SNAPSHOT_ID) {
+  const id = process.env.LIVE_SNAPSHOT_ID;
+  if (!/^[a-f0-9]{64}$/.test(id) || !process.env.RPC_URL || !process.env.PUBLIC_RPC_URL)
+    throw new Error("Live control requires LIVE_SNAPSHOT_ID, RPC_URL and PUBLIC_RPC_URL.");
+  const network = process.env.LIVE_NETWORK ?? "devnet";
+  if (network !== "devnet" && network !== "localnet") throw new Error("Unsupported live network.");
+  const rpcUrl = new URL(process.env.PUBLIC_RPC_URL);
+  if (!["http:", "https:"].includes(rpcUrl.protocol) || rpcUrl.username || rpcUrl.password)
+    throw new Error("PUBLIC_RPC_URL must be a browser-safe HTTP endpoint.");
+  const latest = object(readJson(command([binary, "latest", id], env)));
+  const record = object(latest.record);
+  const snapshot = object(record.snapshot);
+  const observation = object(snapshot.observation);
+  const targets = array(snapshot.targets);
+  if (
+    observation.origin !== "finalized" ||
+    targets.length !== 1 ||
+    object(targets[0]).kind !== "spl_delegate" ||
+    (network === "devnet" && observation.cluster !== DEVNET_GENESIS)
+  )
+    throw new Error("Live control requires a finalized singleton SPL scope on the selected network.");
+  control = { scope: text(latest.scope_id), rpcUrl: rpcUrl.href, network };
+  scenarios.push({
+    name: network === "devnet" ? "Devnet SPL delegate" : "Local validator SPL delegate",
+    scope: control.scope,
+    snapshots: [{ id: text(record.id), slot: String(observation.slot) }],
+    examples: [{ label: "Source account", address: publicKey(object(targets[0]).source) }],
+  });
+}
 
 const runtimePort = Number(process.env.RUNTIME_PORT ?? 8890);
 const runtimeUrl = `http://127.0.0.1:${runtimePort}`;
@@ -94,6 +129,7 @@ try {
     scenarios,
     Number(process.env.PORT ?? 3000),
     process.env.HOST ?? "127.0.0.1",
+    control,
   );
   console.log(`Catalyst demo: ${server!.url}`);
   const exitCode = await runtime.exited;

@@ -1,7 +1,14 @@
 import index from "./index.html";
 import { isAddress } from "@solana/addresses";
+import type { Control } from "./control.ts";
 
-export function createServer(runtime: string, scenarios: unknown, port: number, hostname = "127.0.0.1") {
+export function createServer(
+  runtime: string,
+  scenarios: unknown,
+  port: number,
+  hostname = "127.0.0.1",
+  control: Control | null = null,
+) {
   return Bun.serve({
     port,
     hostname,
@@ -20,8 +27,9 @@ export function createServer(runtime: string, scenarios: unknown, port: number, 
       );
       const receipt = /^\/api\/verifications\/revoke\/[a-f0-9]{64}$/.test(url.pathname);
       const scenariosPath = url.pathname === "/api/scenarios";
+      const controlPath = url.pathname === "/api/control";
       if (
-        (!match && !action && !receipt && !scenariosPath) ||
+        (!match && !action && !receipt && !scenariosPath && !controlPath) ||
         (match?.[4] && !isAddress(match[4])) ||
         (action && !isAddress(action[2]!))
       )
@@ -30,6 +38,7 @@ export function createServer(runtime: string, scenarios: unknown, port: number, 
       if (request.method !== method)
         return new Response("Method not allowed", { status: 405, headers: { Allow: method } });
       if (scenariosPath) return Response.json(scenarios);
+      if (controlPath) return Response.json(control, { headers: { "Cache-Control": "no-store" } });
       // Cross-origin browser requests cannot supply this header without a CORS preflight.
       if (action && request.headers.get("X-Velon-Action") !== "revoke")
         return new Response("Action header required", { status: 403 });

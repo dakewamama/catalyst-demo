@@ -99,14 +99,56 @@ Set `RPC_URL` for Cataloger's action endpoints. They remain unavailable without 
 The imported fixtures alone do not establish live authority. Cataloger still requires
 verified deployment/runtime evidence and current state before returning signing bytes.
 A 404 during finalization remains pending or absent, not a successful revocation.
-Wallet controls and finalization polling are not wired into the browser yet.
+The browser connects through Wallet Standard and requires `solana:signTransaction`.
+It passes the reviewed bytes through Catalyst's pinned signing/submission helper.
+Changed messages, invalid signatures, expired blockhashes and changed checkpoints
+stop submission. A send response alone never produces a success screen: verification
+must succeed, the current scope must agree, and the grant must be absent after reload.
+
+## Wallet control
+
+Fixture scenarios remain read-only. To expose an existing finalized SPL observation,
+configure the same journal and providers used to collect it:
+
+```sh
+DATABASE_URL=sqlite:///absolute/path/observations.db \
+LIVE_SNAPSHOT_ID=<retained-snapshot-id> \
+LIVE_NETWORK=devnet \
+RPC_URL=<server-rpc-url> \
+PUBLIC_RPC_URL=<browser-safe-rpc-url> \
+CATALOGER_DIR=/absolute/path/to/cataloger bun run demo
+```
+
+`PUBLIC_RPC_URL` is deliberately exposed to the browser. Use a public endpoint or
+one explicitly intended for browser use; do not put a private provider credential
+there. Cataloger and browser RPCs must serve the same genesis. Devnet is checked
+against its exact genesis identity. `LIVE_NETWORK=localnet` labels every action as
+local-validator execution and never claims public-chain finality.
+
+Connect the token-account owner's signing wallet, select the live permission and
+choose Revoke. Review the principal, account, allowance and network, then confirm
+in the wallet. Finalization polls the existing verification endpoint without
+resending. Keep the displayed signature if finalization fails or remains uncertain.
+Account changes invalidate the session. A successful screen includes the finalized
+transaction slot and retained verification ID.
+
+A compatible finalized deployment/runtime witness is still required. Current public
+captures do not supply one, so they remain incomplete and cannot open a signing
+review. Simulation requires the same finalized bank as the retained observation;
+stale captures need fresh collection and review. This change does not bypass that
+requirement or add a continuous collector.
+
+The browser tests register an ephemeral test wallet, sign real legacy revoke bytes
+with Ed25519 and run the actual Catalyst helper. RPC finality and reobservation
+responses in those tests are synthetic. They prove browser conformance, not an
+executed devnet journey or compatibility testing with a particular wallet extension.
 
 ## Scope
 
-The browser remains a read-only native fixture replay. Live code identity is independently
-verified in the SDK/runtime, but the showcased grant accounts are local executable
-fixtures. Wallet execution, transaction simulation Diff, continuous indexing,
-Squads, Swig and exact intent compilation are still separate milestones. No claim
+The default browser mode replays native fixtures. An explicitly configured finalized
+SPL scope enables wallet control through existing runtime and SDK APIs. Live public
+execution, continuous collection/repair, general transaction Diff, Squads, Swig and
+exact intent compilation remain separate milestones. No claim
 is made that this repository already implements the full cross-protocol closed loop
 or that no other public or private implementation exists.
 
