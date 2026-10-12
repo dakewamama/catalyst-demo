@@ -11,6 +11,7 @@
     "test": "bun test tests/*.test.ts",
     "test:e2e": "playwright test",
     "test:live": "playwright test --config playwright.live.config.ts",
+    "export": "bun run build && bun scripts/export.ts",
     "local": "bun scripts/local.ts",
     "local:reset": "bun scripts/reset.ts"
   },
