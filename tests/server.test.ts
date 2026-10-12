@@ -33,7 +33,8 @@ test("provider failure is explicit and existing conflict status survives", async
   expect((await fetch(path)).status).toBe(502);
 });
 
-const revokePath = `/api/snapshots/${"a".repeat(64)}/actions/revoke/11111111111111111111111111111111`;
+const revokePath = `/api/scopes/${"a".repeat(64)}/actions/revoke/11111111111111111111111111111111`;
+const verifyPath = `/api/snapshots/${"b".repeat(64)}/actions/revoke/11111111111111111111111111111111/verify`;
 const actionHeaders = { "X-Velon-Action": "revoke" };
 
 test("revoke simulation forwards only the canonical request and preserves evidence bytes", async () => {
@@ -68,7 +69,7 @@ test("verification forwards signed bytes unchanged and retains pending, conflict
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
-      expect(new URL(request.url).pathname).toBe(`${revokePath.slice(4)}/verify`);
+      expect(new URL(request.url).pathname).toBe(verifyPath.slice(4));
       expect(request.method).toBe("POST");
       expect(request.headers.get("Content-Type")).toBe("application/json");
       expect(await request.text()).toBe(signed);
@@ -79,7 +80,7 @@ test("verification forwards signed bytes unchanged and retains pending, conflict
   servers.push(upstream, server);
   for (const status of [404, 409, 422, 500, 200]) {
     upstreamStatus = status;
-    const response = await fetch(new URL(`${revokePath}/verify`, server.url), {
+    const response = await fetch(new URL(verifyPath, server.url), {
       method: "POST",
       headers: { ...actionHeaders, "Content-Type": "application/json; charset=utf-8" },
       body: signed,
@@ -107,7 +108,9 @@ test("action allowlist rejects invalid requests before contacting the runtime", 
     [revokePath, { method: "OPTIONS" }, 405],
     [revokePath, { method: "POST" }, 403],
     [revokePath, { ...post, body: "unexpected" }, 400],
-    [`${revokePath}/verify`, { ...post, body: "{}" }, 415],
+    [verifyPath, { ...post, body: "{}" }, 415],
+    [`${revokePath}/verify`, post, 404],
+    [verifyPath.slice(0, -"/verify".length), post, 404],
     [`${revokePath}?rpc=https://example.com`, post, 404],
     [`${revokePath}/send`, post, 404],
     [revokePath.replace("a".repeat(64), "A".repeat(64)), post, 404],
@@ -119,13 +122,55 @@ test("action allowlist rejects invalid requests before contacting the runtime", 
     expect(response.status).toBe(expected);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
   }
-  const oversized = await fetch(new URL(`${revokePath}/verify`, server.url), {
+  const oversized = await fetch(new URL(verifyPath, server.url), {
     ...post,
     headers: { ...actionHeaders, "Content-Type": "application/json" },
     body: " ".repeat(4097),
   });
   expect(oversized.status).toBe(413);
   expect(calls).toBe(0);
+});
+
+test("live observation passes one validated address and nothing else to the collector", async () => {
+  const received: string[] = [];
+  const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("unexpected") });
+  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, async (source) => {
+    received.push(source);
+    return new Response('{"scope_id":"s","record":{"slot":18446744073709551615}}');
+  });
+  const disabled = createServer(String(upstream.url), [], 0);
+  servers.push(upstream, server, disabled);
+  const source = "11111111111111111111111111111111";
+  const headers = { "X-Velon-Action": "observe", "Content-Type": "application/json" };
+  const post = (body: string, init: RequestInit = {}, target = server) =>
+    fetch(new URL("/api/live/spl/observe", target.url), { method: "POST", headers, body, ...init });
+  const accepted = await post(JSON.stringify({ source }));
+  expect(await accepted.text()).toBe('{"scope_id":"s","record":{"slot":18446744073709551615}}');
+  for (const body of [
+    "",
+    "not json",
+    "null",
+    `["${source}"]`,
+    JSON.stringify({ source: "../../etc/passwd" }),
+    JSON.stringify({ source: `${source}; rm -rf /` }),
+    JSON.stringify({ source: `${source}\n--config=/tmp/x` }),
+    JSON.stringify({ source: [source] }),
+    JSON.stringify({ source, accounts: [source] }),
+    JSON.stringify({ source, cluster: "other" }),
+  ])
+    expect((await post(body)).status).toBe(400);
+  expect(
+    (await post(JSON.stringify({ source }), { headers: { "Content-Type": "application/json" } })).status,
+  ).toBe(403);
+  expect((await post(JSON.stringify({ source }), { headers: { "X-Velon-Action": "observe" } })).status).toBe(
+    415,
+  );
+  expect(
+    (await post(JSON.stringify({ source }), { headers: { ...headers, "X-Velon-Action": "revoke" } })).status,
+  ).toBe(403);
+  expect((await fetch(new URL("/api/live/spl/observe", server.url))).status).toBe(405);
+  expect((await post(JSON.stringify({ source }), {}, disabled)).status).toBe(404);
+  expect(received).toEqual([source]);
 });
 
 test("retained verification is read-only and forwards the exact evidence path", async () => {

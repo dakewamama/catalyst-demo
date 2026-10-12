@@ -101,7 +101,7 @@ export function permissionLabel(grant: ObjectValue): string {
 
 export type Change = { kind: "added" | "removed" | "changed"; before?: ObjectValue; after?: ObjectValue };
 
-function semantic(grant: ObjectValue): ObjectValue {
+export function semantic(grant: ObjectValue): ObjectValue {
   const { evidence: _, ...meaning } = grant;
   return meaning;
 }

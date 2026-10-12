@@ -1,13 +1,16 @@
 import { resolve } from "node:path";
-import { mkdir } from "node:fs/promises";
-import { array, grants, object, publicKey, readJson, text } from "../src/wire.ts";
+import { mkdir, unlink } from "node:fs/promises";
+import { getAddressEncoder, isAddress, type Address } from "@solana/addresses";
+import { array, grants, object, publicKey, readJson, text, type Json } from "../src/wire.ts";
 import { DEVNET_GENESIS, type Control } from "../src/control.ts";
+import type { Observe } from "../src/server.ts";
 
-const CATALOGER_REVISION = "b5c3c4adfe607acaf40d611a34e7265c34f93898";
+const CATALOGER_REVISION = "37732273c0bf8f921155de11e7949d3888852aa6";
+const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 const root = resolve(import.meta.dir, "..");
 const cataloger = resolve(process.env.CATALOGER_DIR ?? `${root}/../cataloger`);
-const data = `${root}/.data`;
-await mkdir(data, { recursive: true });
+const dataDir = `${root}/.data`;
+await mkdir(dataDir, { recursive: true });
 if (!(await Bun.file(`${cataloger}/Cargo.toml`).exists()))
   throw new Error("Cataloger checkout not found. Set CATALOGER_DIR as described in README.");
 
@@ -24,7 +27,7 @@ command(["cargo", "build", "--locked", "-p", "catalyst-indexer", "--bin", "autho
 const binary = `${resolve(cataloger, process.env.CARGO_TARGET_DIR ?? "target")}/debug/authorization-api`;
 const env = {
   ...process.env,
-  DATABASE_URL: process.env.DATABASE_URL ?? `sqlite://${data}/observations-${CATALOGER_REVISION}.db`,
+  DATABASE_URL: process.env.DATABASE_URL ?? `sqlite://${dataDir}/observations-${CATALOGER_REVISION}.db`,
 };
 const fixtures = `${cataloger}/services/catalyst-indexer/tests/fixtures`;
 const definitions = [
@@ -57,37 +60,99 @@ const scenarios = definitions.map(({ name, files }) => {
     id: text(record.id),
     slot: String(object(object(record.snapshot).observation).slot),
   }));
-  return { name, scope: text(latest.scope_id), snapshots, examples };
+  return { name, scope: text(latest.scope_id), live: false, snapshots, examples };
 });
 
+async function rpc(method: string, params: Json[] = []): Promise<Json> {
+  const response = await fetch(process.env.RPC_URL!, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const reply = object(readJson(await response.text()));
+  if (reply.result === undefined) throw new Error(`RPC ${method} failed.`);
+  return reply.result;
+}
+
+async function run(args: string[]): Promise<string> {
+  const child = Bun.spawn(args, { cwd: cataloger, env, stdout: "pipe", stderr: "inherit" });
+  const output = await new Response(child.stdout).text();
+  if ((await child.exited) !== 0) throw new Error(`Command failed: ${args[1]}`);
+  return output;
+}
+
 let control: Control | null = null;
-if (process.env.LIVE_SNAPSHOT_ID) {
-  const id = process.env.LIVE_SNAPSHOT_ID;
-  if (!/^[a-f0-9]{64}$/.test(id) || !process.env.RPC_URL || !process.env.PUBLIC_RPC_URL)
-    throw new Error("Live control requires LIVE_SNAPSHOT_ID, RPC_URL and PUBLIC_RPC_URL.");
+let observe: Observe | undefined;
+if (process.env.RPC_URL) {
+  if (!process.env.PUBLIC_RPC_URL || !process.env.LIVE_CATALOG)
+    throw new Error("Live control requires RPC_URL, PUBLIC_RPC_URL and LIVE_CATALOG.");
   const network = process.env.LIVE_NETWORK ?? "devnet";
   if (network !== "devnet" && network !== "localnet") throw new Error("Unsupported live network.");
   const rpcUrl = new URL(process.env.PUBLIC_RPC_URL);
   if (!["http:", "https:"].includes(rpcUrl.protocol) || rpcUrl.username || rpcUrl.password)
     throw new Error("PUBLIC_RPC_URL must be a browser-safe HTTP endpoint.");
-  const latest = object(readJson(command([binary, "latest", id], env)));
-  const record = object(latest.record);
-  const snapshot = object(record.snapshot);
-  const observation = object(snapshot.observation);
-  const targets = array(snapshot.targets);
-  if (
-    observation.origin !== "finalized" ||
-    targets.length !== 1 ||
-    object(targets[0]).kind !== "spl_delegate" ||
-    (network === "devnet" && observation.cluster !== DEVNET_GENESIS)
-  )
-    throw new Error("Live control requires a finalized singleton SPL scope on the selected network.");
-  control = { scope: text(latest.scope_id), rpcUrl: rpcUrl.href, network };
+  const cluster = text(await rpc("getGenesisHash"));
+  if (cluster === MAINNET_GENESIS || (network === "devnet") !== (cluster === DEVNET_GENESIS))
+    throw new Error(`LIVE_NETWORK=${network} does not describe the cluster behind RPC_URL (${cluster}).`);
+  const catalog = resolve(process.env.LIVE_CATALOG);
+  const verified = array(readJson(await Bun.file(catalog).text()))
+    .map(object)
+    .some(
+      (version) =>
+        version.cluster === cluster &&
+        object(version.adapter).protocol === "spl-token" &&
+        version.executable != null &&
+        object(version.executable).runtime != null,
+    );
+  if (!verified)
+    throw new Error(`LIVE_CATALOG has no SPL Token deployment with runtime evidence for cluster ${cluster}.`);
+  control = { rpcUrl: rpcUrl.href, network, cluster };
+  const bytes = (address: string) => Array.from(getAddressEncoder().encode(address as Address));
+  observe = async (source) => {
+    try {
+      // Discovery only names witness accounts; Cataloger reads and decodes the finalized batch itself.
+      const info = object(
+        await rpc("getAccountInfo", [source, { encoding: "jsonParsed", commitment: "finalized" }]),
+      );
+      const witnesses: string[] = [];
+      const data = info.value === null ? null : object(info.value).data;
+      if (data !== null && !Array.isArray(data) && object(data).program === "spl-token") {
+        const token = object(object(object(data).parsed).info);
+        for (const key of [token.owner, token.delegate])
+          if (typeof key === "string" && isAddress(key)) witnesses.push(key);
+      }
+      const scope = `${dataDir}/scope-${crypto.randomUUID()}.json`;
+      await Bun.write(
+        scope,
+        JSON.stringify({
+          cluster,
+          accounts: witnesses.map(bytes),
+          targets: [{ kind: "spl_delegate", source: bytes(source) }],
+          min_context_slot: null,
+        }),
+      );
+      let record: string;
+      try {
+        record = await run([binary, "observe", catalog, scope]);
+      } finally {
+        await unlink(scope);
+      }
+      return new Response(await run([binary, "latest", text(object(readJson(record)).id)]), {
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    } catch {
+      return Response.json({ error: "Live observation failed. Check the token account." }, { status: 502 });
+    }
+  };
+  const example = process.env.LIVE_SOURCE;
+  if (example && !isAddress(example)) throw new Error("LIVE_SOURCE must be a token account address.");
   scenarios.push({
-    name: network === "devnet" ? "Devnet SPL delegate" : "Local validator SPL delegate",
-    scope: control.scope,
-    snapshots: [{ id: text(record.id), slot: String(observation.slot) }],
-    examples: [{ label: "Source account", address: publicKey(object(targets[0]).source) }],
+    name: network === "devnet" ? "Devnet SPL token account" : "Local validator SPL token account",
+    scope: "",
+    live: true,
+    snapshots: [],
+    examples: example ? [{ label: "Demo token account", address: example }] : [],
   });
 }
 
@@ -130,6 +195,7 @@ try {
     Number(process.env.PORT ?? 3000),
     process.env.HOST ?? "127.0.0.1",
     control,
+    observe,
   );
   console.log(`Catalyst demo: ${server!.url}`);
   const exitCode = await runtime.exited;

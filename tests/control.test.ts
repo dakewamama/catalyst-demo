@@ -3,6 +3,8 @@ import { DEVNET_GENESIS, reviewRevoke, verifiedRevoke } from "../src/control.ts"
 import { object, type ObjectValue } from "../src/wire.ts";
 import fixture from "./fixtures/spl-control.json";
 
+const devnet = { cluster: DEVNET_GENESIS, rpcUrl: "http://127.0.0.1:1", network: "devnet" } as const;
+
 function input() {
   const grant = structuredClone(fixture.grant) as ObjectValue;
   const view = { ...fixture.view, observation: { origin: "finalized", cluster: DEVNET_GENESIS, slot: 10 } };
@@ -28,13 +30,15 @@ function input() {
 
 test("review binds native revoke bytes, owner, permission and simulation bank", () => {
   const { grant, view, simulation } = input();
-  const review = reviewRevoke(simulation, view, grant, fixture.signing.owner, "devnet");
+  const review = reviewRevoke(simulation, view, grant, fixture.signing.owner, devnet);
   expect(Buffer.from(review.bytes).toString("base64")).toBe(fixture.signing.signing_transaction);
   expect(review.minContextSlot).toBe(10n);
   expect(review.lifetime.lastValidBlockHeight).toBe(100n);
-  expect(() => reviewRevoke(simulation, view, grant, fixture.signing.source, "devnet")).toThrow(
+  expect(() => reviewRevoke(simulation, view, grant, fixture.signing.source, devnet)).toThrow(
     "required owner",
   );
+  const elsewhere = { ...devnet, cluster: "another-genesis", network: "localnet" } as const;
+  expect(() => reviewRevoke(simulation, view, grant, fixture.signing.owner, elsewhere)).toThrow();
   for (const mutate of [
     (s: ObjectValue) => (s.state_version = "different"),
     (s: ObjectValue) => (object(s.observation).origin = "fixture"),
@@ -48,7 +52,7 @@ test("review binds native revoke bytes, owner, permission and simulation bank", 
   ]) {
     const changed = structuredClone(simulation) as ObjectValue;
     mutate(changed);
-    expect(() => reviewRevoke(changed, view, grant, fixture.signing.owner, "devnet")).toThrow();
+    expect(() => reviewRevoke(changed, view, grant, fixture.signing.owner, devnet)).toThrow();
   }
 });
 

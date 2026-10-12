@@ -39,11 +39,14 @@ async function browserProvider(page: Page, mode = "success") {
   let finalized = false;
   let polls = 0;
   let sends = 0;
+  let observes = 0;
   let signed = "";
   let stale = false;
+  let changed = false;
   const observation = { origin: "finalized", cluster: DEVNET_GENESIS, bank: "browser-test", slot: 10 };
   const afterObservation = { ...observation, slot: 12 };
   const coverage = { complete: false, accounts: [], targets: [] };
+  const current = () => (changed ? { ...grant, usage: { ...grant.usage, remaining: 24 } } : grant);
   const view = () => ({
     state_version: finalized ? afterId : beforeId,
     observation: finalized ? afterObservation : observation,
@@ -53,7 +56,7 @@ async function browserProvider(page: Page, mode = "success") {
     arm_schema_version: "0.1",
     projection: {
       status: "compiled",
-      authorizations: finalized ? [] : [{ authorization: grant, availability: "active" }],
+      authorizations: finalized ? [] : [{ authorization: current(), availability: "active" }],
     },
   });
   const record = () => ({
@@ -119,43 +122,58 @@ async function browserProvider(page: Page, mode = "success") {
     },
   );
   await page.route("**/api/control", (route) =>
-    route.fulfill({ json: { scope, rpcUrl: "http://127.0.0.1:3390/wallet-test-rpc", network: "devnet" } }),
+    route.fulfill({
+      json: { cluster: DEVNET_GENESIS, rpcUrl: "http://127.0.0.1:3390/wallet-test-rpc", network: "devnet" },
+    }),
   );
   await page.route("**/api/scenarios", (route) =>
     route.fulfill({
       json: [
         {
           name: "Devnet browser test",
-          scope,
-          snapshots: [{ id: beforeId, slot: "10" }],
+          scope: "",
+          live: true,
+          snapshots: [],
           examples: [{ label: "Source account", address: fixture.signing.source }],
         },
       ],
     }),
   );
+  await page.route("**/api/live/spl/observe", (route) => {
+    observes++;
+    expect(route.request().headers()["x-velon-action"]).toBe("observe");
+    expect(route.request().postDataJSON()).toEqual({ source: fixture.signing.source });
+    return route.fulfill({ json: { scope_id: scope, record: record() } });
+  });
   await page.route(`**/api/scopes/${scope}/effective/*`, (route) => route.fulfill({ json: view() }));
   await page.route(`**/api/scopes/${scope}`, (route) => route.fulfill({ json: record() }));
-  await page.route(`**/api/snapshots/${beforeId}/actions/revoke/${fixture.signing.source}`, (route) => {
+  await page.route(`**/api/scopes/${scope}/actions/revoke/${fixture.signing.source}`, (route) => {
     stale = mode === "stale";
+    changed = mode === "changed";
+    const refused = { unsupported: 422, moved: 409 }[mode];
     return route.fulfill({
-      status: mode === "unsupported" ? 422 : 200,
-      json:
-        mode === "unsupported"
-          ? { error: "Runtime evidence unavailable" }
-          : {
-              state_version: beforeId,
-              arm_schema_version: "0.1",
-              observation,
-              changes: [{ kind: "removed", authorization: grant }],
-              signing_transaction: signing,
-              response: {
-                context: { slot: 10 },
-                value: {
-                  err: null,
-                  replacementBlockhash: { blockhash: fixture.signing.blockhash, lastValidBlockHeight: 100 },
-                },
+      status: refused ?? 200,
+      json: refused
+        ? {
+            error:
+              mode === "moved"
+                ? "Invalid observation: simulation/context slot mismatch"
+                : "Runtime evidence unavailable",
+          }
+        : {
+            state_version: beforeId,
+            arm_schema_version: "0.1",
+            observation,
+            changes: [{ kind: "removed", authorization: current() }],
+            signing_transaction: signing,
+            response: {
+              context: { slot: 10 },
+              value: {
+                err: null,
+                replacementBlockhash: { blockhash: fixture.signing.blockhash, lastValidBlockHeight: 100 },
               },
             },
+          },
     });
   });
   await page.route("**/wallet-test-rpc", async (route) => {
@@ -171,6 +189,8 @@ async function browserProvider(page: Page, mode = "success") {
       expect(submitted.messageBytes).toEqual(
         decoder.decode(new Uint8Array(Buffer.from(signing, "base64"))).messageBytes,
       );
+      // A lost response leaves submission unknown; only finalized verification can settle it.
+      if (mode === "unknown") return route.abort("connectionreset");
       result = getSignatureFromTransaction(submitted);
     } else throw new Error(`Unexpected RPC ${request.method}`);
     await route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result } });
@@ -194,7 +214,7 @@ async function browserProvider(page: Page, mode = "success") {
       },
     });
   });
-  return { counts: () => ({ sends, polls }) };
+  return { counts: () => ({ sends, polls, observes }) };
 }
 
 async function connectAndReview(page: Page) {
@@ -217,7 +237,7 @@ test("wallet signs exact revoke and success waits for finalized verification and
   await expect(page.locator("#results article")).toHaveCount(0);
   await expect(page.locator("#action-result")).toContainText("Verified on chain (devnet).");
   await expect(page.locator("#action-result")).toContainText("c".repeat(64));
-  expect(provider.counts()).toEqual({ sends: 1, polls: 2 });
+  expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
   await page.screenshot({ path: `test-results/${info.project.name}-verified.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -241,10 +261,27 @@ for (const mode of [
   });
 }
 
-test("missing runtime evidence never opens a signing review", async ({ page }) => {
-  const provider = await browserProvider(page, "unsupported");
+test("an unknown submission is settled by finalized verification, never resent", async ({ page }) => {
+  const provider = await browserProvider(page, "unknown");
   await connectAndReview(page);
-  await expect(page.getByRole("heading", { name: "FAILED", exact: true })).toBeVisible();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
-  expect(provider.counts().sends).toBe(0);
+  await page.getByRole("button", { name: "Confirm in wallet" }).click();
+  await expect(page.locator("#action-result")).toContainText("Submission response is uncertain");
+  await expect(page.getByRole("heading", { name: "REVOKED", exact: true })).toBeVisible();
+  await expect(page.locator("#results article")).toHaveCount(0);
+  expect(provider.counts()).toMatchObject({ sends: 1, polls: 2 });
 });
+
+for (const [mode, reason] of [
+  ["unsupported", "Runtime evidence unavailable"],
+  ["moved", "Nothing was signed"],
+  ["changed", "changed after the scan"],
+]) {
+  test(`no signing review opens: ${mode}`, async ({ page }) => {
+    const provider = await browserProvider(page, mode);
+    await connectAndReview(page);
+    await expect(page.getByRole("heading", { name: "FAILED", exact: true })).toBeVisible();
+    await expect(page.locator("#action-result")).toContainText(reason!);
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    expect(provider.counts().sends).toBe(0);
+  });
+}

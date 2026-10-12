@@ -13,6 +13,7 @@ import {
   permissionLabel,
   principalLabel,
   readJson,
+  semantic,
   text,
   writeJson,
   type Json,
@@ -22,6 +23,7 @@ import {
 type Scenario = {
   name: string;
   scope: string;
+  live: boolean;
   snapshots: { id: string; slot: string }[];
   examples: { label: string; address: string }[];
 };
@@ -197,7 +199,7 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string): HTML
   row.append(button);
   if (
     control &&
-    currentScenario().scope === control.scope &&
+    currentScenario().live &&
     connected &&
     object(view.observation).origin === "finalized" &&
     grant.observability === "exact" &&
@@ -209,7 +211,7 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string): HTML
     object(grant.subject).value === connected.account.address
   ) {
     const revoke = node("button", "Revoke", "action-button");
-    revoke.onclick = () => void prepare(grant, view);
+    revoke.onclick = () => void prepare(grant);
     row.append(revoke);
   }
   return row;
@@ -221,7 +223,7 @@ function currentScenario(): Scenario {
   return scenario;
 }
 
-async function scan(historical = false) {
+async function scan(historical = false, refresh = false) {
   invalidateReview();
   request?.abort();
   request = new AbortController();
@@ -231,21 +233,34 @@ async function scan(historical = false) {
   detail.hidden = true;
   scanButton.disabled = false;
   if (!isAddress(address)) {
-    status("Enter a valid Solana address.", true);
+    status(
+      currentScenario().live ? "Paste a token account to observe." : "Enter a valid Solana address.",
+      true,
+    );
     return;
   }
   scanButton.disabled = true;
   status("Loading the selected observation...");
   try {
     const scenario = currentScenario();
-    const live = control?.scope === scenario.scope;
+    const live = scenario.live;
+    if (live && (refresh || !scenario.scope)) {
+      status("Observing the finalized token account...");
+      const observed = await fetch("/api/live/spl/observe", {
+        method: "POST",
+        headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+        body: JSON.stringify({ source: address }),
+        signal,
+      });
+      scenario.scope = text(object(await result(observed)).scope_id);
+    }
     document.querySelector(".header-links .badge")!.textContent = live
       ? control!.network === "devnet"
         ? "Devnet observation"
         : "Local validator"
       : "Native fixture replay";
     document.querySelector(".scope-note")!.textContent = live
-      ? "These permissions come from the latest retained finalized observation. Coverage is partial; review checks must pass before signing."
+      ? "These permissions come from a finalized observation of this token account. Coverage is partial; review checks must pass before signing."
       : "This replay uses accounts captured from executed native tests. Coverage is partial. Every result is tied to an observed state.";
     const path = historical
       ? `snapshots/${scenario.snapshots[0]!.id}/authorizations/${address}`
@@ -365,7 +380,7 @@ async function showDiff() {
   }
 }
 
-function setMode(next: "scan" | "diff") {
+function setMode(next: "scan" | "diff", refresh = false) {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
   invalidateReview();
   mode = next;
@@ -377,22 +392,23 @@ function setMode(next: "scan" | "diff") {
   if (next === "diff") {
     scanButton.disabled = false;
     void showDiff();
-  } else void scan();
+  } else void scan(false, refresh);
 }
 
 function selectScenario() {
   const scenario = currentScenario();
   const examples = document.querySelector("#examples")!;
-  examples.replaceChildren(node("span", "Try a recorded address:", "muted"));
+  examples.replaceChildren();
+  if (scenario.examples.length) examples.append(node("span", "Try a recorded address:", "muted"));
   for (const example of scenario.examples) {
     const button = node("button", example.label, "example");
     button.onclick = () => {
       input.value = example.address;
-      setMode("scan");
+      setMode("scan", true);
     };
     examples.append(button);
   }
-  input.value = scenario.examples[0]!.address;
+  input.value = scenario.examples[0]?.address ?? "";
   if (mode === "diff") void showDiff();
   else void scan();
 }
@@ -404,6 +420,7 @@ let actionAbort: AbortController | undefined;
 let actionState: ActionState | undefined;
 const walletChoice = document.querySelector<HTMLSelectElement>("#wallet-choice")!;
 const connectButton = document.querySelector<HTMLButtonElement>("#connect-wallet")!;
+const disconnectButton = document.querySelector<HTMLButtonElement>("#disconnect-wallet")!;
 const walletStatus = document.querySelector<HTMLElement>("#wallet-status")!;
 const review = document.querySelector<HTMLDialogElement>("#revoke-review")!;
 const actionResult = document.querySelector<HTMLElement>("#action-result")!;
@@ -438,12 +455,20 @@ refreshWallets();
 function disconnected() {
   actionAbort?.abort();
   review.close();
+  unsubscribe?.();
+  unsubscribe = undefined;
   connected = undefined;
+  disconnectButton.hidden = true;
   walletStatus.textContent = "Wallet changed or disconnected. Connect again to review.";
   if (actionState)
     setAction("FAILED", "Wallet changed. Any submitted transaction must still be checked on chain.");
   void scan();
 }
+disconnectButton.onclick = () => {
+  if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
+  disconnected();
+  walletStatus.textContent = "Disconnected.";
+};
 connectButton.onclick = async () => {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
   try {
@@ -461,12 +486,15 @@ connectButton.onclick = async () => {
     connected = { wallet, account };
     unsubscribe = wallet.features["standard:events"].on("change", disconnected);
     walletStatus.textContent = `${wallet.name}: ${account.address}`;
-    if (control) {
-      const index = scenarios.findIndex((scenario) => scenario.scope === control!.scope);
-      if (index >= 0) select.value = String(index);
+    disconnectButton.hidden = false;
+    const live = scenarios.findIndex((scenario) => scenario.live);
+    if (live >= 0) {
+      select.value = String(live);
+      selectScenario();
+    } else {
+      input.value = account.address;
+      setMode("scan");
     }
-    input.value = account.address;
-    setMode("scan");
   } catch (error) {
     status(error instanceof Error ? error.message : "Wallet connection failed.", true);
   }
@@ -486,7 +514,7 @@ function setAction(state: ActionState, message: string) {
     .forEach((button) => (button.disabled = busy));
 }
 
-async function prepare(grant: ObjectValue, view: ObjectValue) {
+async function prepare(scanned: ObjectValue) {
   if (
     !control ||
     !connected ||
@@ -498,14 +526,25 @@ async function prepare(grant: ObjectValue, view: ObjectValue) {
   const signal = actionAbort.signal;
   const session = connected;
   const config = control;
-  const stateVersion = text(view.state_version);
-  const source = text(object(grant.resource).id);
-  const path = `snapshots/${stateVersion}/actions/revoke/${source}`;
+  const scope = currentScenario().scope;
+  const source = text(object(scanned.resource).id);
   try {
-    setAction("PREPARING", "Checking the native revoke simulation...");
-    const simulated = await result(await action(path, signal));
+    setAction("PREPARING", "Observing the current finalized state...");
+    const response = await action(`scopes/${scope}/actions/revoke/${source}`, signal);
+    if (response.status === 409)
+      throw new Error("The finalized state moved during simulation. Nothing was signed; try again.");
+    const simulated = await result(response);
+    // The runtime simulated a fresh observation; review that state, not the earlier scan.
+    const view = object(await get(`scopes/${scope}/effective/${session.account.address}`, signal));
     signal.throwIfAborted();
-    const prepared = reviewRevoke(simulated, view, grant, session.account.address, config.network);
+    const grant = array(object(view.projection).authorizations ?? [])
+      .map((entry) => authorization(object(entry).authorization))
+      .find((current) => current.id === scanned.id);
+    if (!grant || writeJson(semantic(grant)) !== writeJson(semantic(scanned)))
+      throw new Error("This permission changed after the scan. Scan and review again.");
+    const stateVersion = text(view.state_version);
+    const path = `snapshots/${stateVersion}/actions/revoke/${source}/verify`;
+    const prepared = reviewRevoke(simulated, view, grant, session.account.address, config);
     setAction("SIMULATED", "Review what your wallet will sign.");
     const title = node("h2", "You are removing");
     title.tabIndex = -1;
@@ -535,7 +574,7 @@ async function prepare(grant: ObjectValue, view: ObjectValue) {
       confirm.disabled = true;
       let submittedSignature: string | undefined;
       try {
-        const latest = object(await get(`scopes/${config.scope}`, signal));
+        const latest = object(await get(`scopes/${scope}`, signal));
         if (latest.id !== stateVersion)
           throw new Error("Permission evidence changed. Scan and review again.");
         signal.throwIfAborted();
@@ -556,7 +595,7 @@ async function prepare(grant: ObjectValue, view: ObjectValue) {
             signal.throwIfAborted();
             if (connected !== session || signed.length !== 1)
               throw new Error("Wallet signing response changed.");
-            const current = object(await get(`scopes/${config.scope}`, signal));
+            const current = object(await get(`scopes/${scope}`, signal));
             if (current.id !== stateVersion)
               throw new Error("Permission evidence changed while signing. Review again.");
             setAction("SUBMITTING", "Submitting the exact reviewed transaction...");
@@ -574,13 +613,13 @@ async function prepare(grant: ObjectValue, view: ObjectValue) {
         actionResult.append(field("Transaction signature", sent.signature));
         for (let attempt = 0; attempt < 60; attempt++) {
           signal.throwIfAborted();
-          const response = await action(`${path}/verify`, signal, sent.signedTransaction);
+          const response = await action(path, signal, sent.signedTransaction);
           if (response.status === 404) {
             await new Promise<void>((resolve) => setTimeout(resolve, 2000));
             continue;
           }
           const verification = await result(response);
-          const current = await get(`scopes/${config.scope}`, signal);
+          const current = await get(`scopes/${scope}`, signal);
           const checked = verifiedRevoke(
             verification,
             current,
@@ -620,7 +659,7 @@ review.addEventListener("cancel", invalidateReview);
 
 form.onsubmit = (event) => {
   event.preventDefault();
-  setMode("scan");
+  setMode("scan", true);
 };
 select.onchange = selectScenario;
 document.querySelector<HTMLButtonElement>("#scan-tab")!.onclick = () => setMode("scan");
@@ -633,7 +672,7 @@ try {
       throw new Error("Unsupported control network.");
     const rpcUrl = new URL(text(config.rpcUrl));
     if (!["http:", "https:"].includes(rpcUrl.protocol)) throw new Error("Invalid public RPC URL.");
-    control = { scope: text(config.scope), rpcUrl: rpcUrl.href, network: config.network };
+    control = { cluster: text(config.cluster), rpcUrl: rpcUrl.href, network: config.network };
   }
   const manifest = array(scenarioData);
   scenarios = manifest.map((value) => {
@@ -641,6 +680,7 @@ try {
     return {
       name: text(scenario.name),
       scope: text(scenario.scope),
+      live: scenario.live === true,
       snapshots: array(scenario.snapshots).map((value) => ({
         id: text(object(value).id),
         slot: text(object(value).slot),

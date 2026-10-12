@@ -15,7 +15,7 @@ Requirements: Bun 1.3.14 or newer, Node 22, npm, Git and stable Rust.
 
 ```sh
 git clone https://github.com/dakewamama/cataloger.git ../cataloger
-git -C ../cataloger checkout b5c3c4adfe607acaf40d611a34e7265c34f93898
+git -C ../cataloger checkout 37732273c0bf8f921155de11e7949d3888852aa6
 npm ci --ignore-scripts
 bun run demo
 ```
@@ -83,7 +83,8 @@ and traces remain under ignored `test-results/`.
 
 The browser server forwards these existing Cataloger routes:
 
-- `POST /api/snapshots/{id}/actions/revoke/{token_account}` requests simulation.
+- `POST /api/scopes/{scope_id}/actions/revoke/{token_account}` observes the scope's
+  current finalized bank and requests simulation in that same bank.
 - `POST /api/snapshots/{id}/actions/revoke/{token_account}/verify` forwards the
   signed transaction for finalized verification and native reobservation.
 - `GET /api/verifications/revoke/{verification_id}` retrieves retained evidence.
@@ -107,41 +108,64 @@ must succeed, the current scope must agree, and the grant must be absent after r
 
 ## Wallet control
 
-Fixture scenarios remain read-only. To expose an existing finalized SPL observation,
-configure the same journal and providers used to collect it:
+Fixture scenarios remain read-only. With `RPC_URL` set, the demo adds one live
+scenario that observes a classic SPL token account on request:
 
 ```sh
-DATABASE_URL=sqlite:///absolute/path/observations.db \
-LIVE_SNAPSHOT_ID=<retained-snapshot-id> \
-LIVE_NETWORK=devnet \
 RPC_URL=<server-rpc-url> \
 PUBLIC_RPC_URL=<browser-safe-rpc-url> \
+LIVE_NETWORK=localnet \
+LIVE_CATALOG=/absolute/path/catalog.json \
+LIVE_SOURCE=<optional-example-token-account> \
 CATALOGER_DIR=/absolute/path/to/cataloger bun run demo
 ```
 
-`PUBLIC_RPC_URL` is deliberately exposed to the browser. Use a public endpoint or
-one explicitly intended for browser use; do not put a private provider credential
-there. Cataloger and browser RPCs must serve the same genesis. Devnet is checked
-against its exact genesis identity. `LIVE_NETWORK=localnet` labels every action as
-local-validator execution and never claims public-chain finality.
+`POST /api/live/spl/observe` accepts `{"source":"<token account>"}` and nothing else.
+The server validates the address, asks the RPC which owner and delegate accounts the
+token account names, and runs Cataloger's `observe` with one `spl_delegate` target and
+those witnesses. Cataloger reads the finalized batch, decodes it and journals the
+record; the browser never decodes account data. Startup resolves the genesis hash
+behind `RPC_URL` and refuses to start unless `LIVE_CATALOG` holds an SPL Token record
+with executable and runtime evidence for that cluster. `LIVE_NETWORK=devnet` must
+match devnet's genesis; mainnet is refused. `PUBLIC_RPC_URL` is deliberately exposed
+to the browser, so never put a private provider credential there.
 
-Connect the token-account owner's signing wallet, select the live permission and
-choose Revoke. Review the principal, account, allowance and network, then confirm
-in the wallet. Finalization polls the existing verification endpoint without
-resending. Keep the displayed signature if finalization fails or remains uncertain.
-Account changes invalidate the session. A successful screen includes the finalized
-transaction slot and retained verification ID.
+Connect the token-account owner's wallet, observe the account and choose Revoke.
+Revoke asks Cataloger to observe and simulate in one finalized bank, then shows that
+fresh state for review and refuses to open if the permission differs from the one
+scanned. Cataloger answers 409 when no attempt shares a bank; nothing is signed.
+After signing, the pinned Catalyst helper submits the exact reviewed bytes and the
+browser polls verification without resending. The success screen needs a finalized
+receipt, a newer observation and the grant's absence from current state.
 
-A compatible finalized deployment/runtime witness is still required. Current public
-captures do not supply one, so they remain incomplete and cannot open a signing
-review. Simulation requires the same finalized bank as the retained observation;
-stale captures need fresh collection and review. This change does not bypass that
-requirement or add a continuous collector.
+### Local validator
 
-The browser tests register an ephemeral test wallet, sign real legacy revoke bytes
-with Ed25519 and run the actual Catalyst helper. RPC finality and reobservation
-responses in those tests are synthetic. They prove browser conformance, not an
-executed devnet journey or compatibility testing with a particular wallet extension.
+Cataloger interprets executables with Agave 3.1.10's loader. Runtime evidence is
+truthful only for a cluster running that revision, so the reproducible live loop
+uses a local validator and says so on every screen:
+
+```sh
+AGAVE_BIN=/path/to/agave-3.1.10/bin CATALOGER_DIR=/absolute/path/to/cataloger bun run local
+```
+
+The script checks the validator's revision, loads the token program and ProgramData
+from Cataloger's retained finalized mainnet capture, creates an owner, mint and token
+account, approves a delegate for 25 base units and writes the catalog with executable
+identity and runtime evidence for that genesis. It prints the launch command above.
+Rerun it to reset the permission. Then, with the demo running:
+
+```sh
+LIVE_OWNER_KEYPAIR=.data/local/owner.json RPC_URL=http://127.0.0.1:8899 npm run test:live
+```
+
+That test mocks nothing. A browser signs with the owner key, the validator executes
+the revoke, and the test confirms the finalized transaction and the cleared delegate
+through RPC independently of the page.
+
+Devnet and mainnet currently run newer Agave releases than the pinned loader, so no
+catalog record can carry truthful runtime evidence for them and their observations
+stay incomplete. The other browser tests register an ephemeral wallet and use
+synthetic RPC responses; they prove browser conformance, not chain execution.
 
 ## Scope
 

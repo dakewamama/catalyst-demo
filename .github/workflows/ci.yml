@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: dakewamama/cataloger
-          ref: b5c3c4adfe607acaf40d611a34e7265c34f93898
+          ref: 37732273c0bf8f921155de11e7949d3888852aa6
           path: .data/cataloger
       - uses: actions/setup-node@v4
         with:

@@ -13,7 +13,7 @@ import {
   type ObjectValue,
 } from "./wire.ts";
 
-export type Control = { scope: string; rpcUrl: string; network: "devnet" | "localnet" };
+export type Control = { cluster: string; rpcUrl: string; network: "devnet" | "localnet" };
 export type ActionState =
   "PREPARING" | "SIMULATED" | "AWAITING_SIGNATURE" | "SUBMITTING" | "FINALIZING" | "VERIFIED" | "FAILED";
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
@@ -53,7 +53,7 @@ export function reviewRevoke(
   view: ObjectValue,
   grant: ObjectValue,
   owner: string,
-  network: Control["network"],
+  control: Control,
 ) {
   const simulation = object(value);
   const observation = object(simulation.observation);
@@ -65,7 +65,8 @@ export function reviewRevoke(
     observation.origin !== "finalized" ||
     observation.cluster !== object(view.observation).cluster ||
     integer(observation.slot) !== integer(object(view.observation).slot) ||
-    (network === "devnet" && observation.cluster !== DEVNET_GENESIS) ||
+    observation.cluster !== control.cluster ||
+    (control.network === "devnet" && observation.cluster !== DEVNET_GENESIS) ||
     changes.length !== 1 ||
     change.kind !== "removed" ||
     writeJson(change.authorization!) !== writeJson(grant)
