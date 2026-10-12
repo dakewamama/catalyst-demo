@@ -89,6 +89,10 @@ async function recorded() {
     ),
   );
   note.textContent = "Accounts captured from executed native tests.";
+  // Without a chain behind this copy, the page must not promise the live flow.
+  document.querySelector(".closing h2")!.textContent = "Explore the recorded evidence.";
+  document.querySelector(".table .entry .extra p")!.textContent =
+    "Who can spend from a token account and how much. Revoke runs against a live chain; this hosted copy shows recorded evidence only.";
 }
 
 live()
