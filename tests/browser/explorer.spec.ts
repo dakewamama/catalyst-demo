@@ -16,7 +16,7 @@ test("native subscriptions scan, evidence and state comparison", async ({ page }
   const spending = page
     .locator("article")
     .filter({ has: page.getByRole("heading", { name: /Spend up to 100/ }) });
-  await spending.getByRole("button", { name: "Inspect evidence" }).click();
+  await spending.getByRole("button", { name: "View details" }).click();
   await expect(
     page.getByText("These principals share one permission and one allowance.", { exact: false }),
   ).toBeVisible();

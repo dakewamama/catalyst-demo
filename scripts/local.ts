@@ -95,7 +95,8 @@ process.once("SIGTERM", stop);
 
 try {
   for (let attempt = 0; ; attempt++) {
-    if (validator.exitCode !== null || attempt === 150) throw new Error("Validator did not start.");
+    if (validator.exitCode !== null || attempt === 150)
+      throw new Error("Validator did not start. Check that no other validator holds these ports.");
     try {
       if ((await rpc("getHealth")) === "ok") break;
     } catch {

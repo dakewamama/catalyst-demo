@@ -3,74 +3,70 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta
-      name="description"
-      content="Inspect Solana authorization through verified native fixtures and their evidence."
-    />
+    <meta name="description" content="One view for permissions across Solana, backed by native evidence." />
     <title>Velon | My permissions</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/">velon<span> / my permissions</span></a>
-      <div class="header-links">
-        <span class="badge">Native fixture replay</span
-        ><a href="https://github.com/dakewamama/catalyst-demo">GitHub ↗</a>
-      </div>
-    </header>
-    <main>
-      <section class="intro">
-        <p class="eyebrow">Solana authorization</p>
-        <h1>Who can act on this wallet?</h1>
-        <p class="lead">Inspect permissions, their limits and the evidence behind them.</p>
-        <p class="scope-note">
-          This replay uses accounts captured from executed native tests. Coverage is partial. Every result is
-          tied to an observed state.
-        </p>
-      </section>
+      <a class="brand" href="/">Velon</a>
+      <div class="header-links"><span class="badge">Native fixture replay</span></div>
       <section class="wallet-panel" aria-label="Wallet connection">
-        <label for="wallet-choice">Wallet</label>
+        <p id="wallet-status" class="address" role="status"></p>
+        <label class="visually-hidden" for="wallet-choice">Wallet</label>
         <select id="wallet-choice">
           <option>No signing wallet detected</option>
         </select>
         <button id="connect-wallet" type="button">Connect wallet</button>
         <button id="disconnect-wallet" class="link-button" type="button" hidden>Disconnect</button>
-        <p id="wallet-status" class="address" role="status">Connect to review your own permissions.</p>
+      </section>
+    </header>
+    <main>
+      <section class="intro">
+        <h1>Know what can act on your wallet.</h1>
+        <p class="lead">One view for permissions across Solana.</p>
       </section>
       <section class="search-panel" aria-label="Scan an address">
-        <label for="scenario">Native evidence</label>
-        <select id="scenario" disabled>
-          <option>Loading observations...</option>
-        </select>
         <form id="scan-form">
-          <label for="address">Solana address</label>
+          <label for="address">Scan a wallet, token account or authority</label>
           <div class="search-row">
             <input
               id="address"
               name="address"
-              placeholder="Paste a wallet, token account or authority address"
+              placeholder="Solana address"
               autocomplete="off"
               spellcheck="false"
               required
             /><button id="scan" type="submit" disabled>Scan</button>
           </div>
         </form>
-        <div class="examples" id="examples" aria-label="Fixture addresses"></div>
+        <div class="source-row">
+          <label for="scenario">Source</label>
+          <select id="scenario" disabled>
+            <option>Loading observations...</option>
+          </select>
+          <div class="examples" id="examples" aria-label="Example addresses"></div>
+        </div>
+        <p class="scope-note"></p>
       </section>
-      <nav class="tabs" aria-label="Explorer views">
-        <button id="scan-tab" class="selected" type="button">Scan</button>
-        <button id="diff-tab" type="button">Observed Diff</button>
-      </nav>
       <div id="notice" role="status" aria-live="polite"></div>
       <section id="action-result" aria-live="polite" hidden></section>
-      <section id="results" aria-label="Authorization results"></section>
-      <section id="detail" hidden aria-label="Authorization detail"></section>
-      <section id="diff" hidden aria-label="Observed authorization changes"></section>
+      <nav class="tabs" aria-label="Views">
+        <button id="scan-tab" class="selected" type="button">My permissions</button>
+        <button id="diff-tab" type="button">Observed Diff</button>
+      </nav>
+      <section id="results" aria-label="Permissions"></section>
+      <section id="detail" hidden aria-label="Permission detail"></section>
+      <section id="diff" hidden aria-label="Observed permission changes"></section>
     </main>
     <dialog id="revoke-review" aria-label="Review revoke"></dialog>
     <footer>
-      Native permissions · Evidence retained
-      <span>Fixture replay stays read-only. Wallet actions require verified live evidence.</span>
+      <strong>Velon</strong>
+      <span
+        >Every permission here is read from native state. Nothing is called revoked until it is observed
+        again.</span
+      >
+      <a href="https://github.com/dakewamama/catalyst-demo">Source ↗</a>
     </footer>
     <script type="module" src="./app.ts"></script>
   </body>

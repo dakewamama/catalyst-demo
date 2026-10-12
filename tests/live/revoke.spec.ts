@@ -66,7 +66,7 @@ test("owner revokes a finalized SPL delegate and the chain agrees", async ({ pag
   await expect(page.getByRole("dialog")).toContainText(source);
   await page.screenshot({ path: "test-results/live-review.png", fullPage: true });
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
-  await expect(page.getByRole("heading", { name: "REVOKED", exact: true })).toBeVisible({ timeout: 150000 });
+  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible({ timeout: 150000 });
   await expect(page.locator("#results article")).toHaveCount(0);
   await page.screenshot({ path: "test-results/live-verified.png", fullPage: true });
 

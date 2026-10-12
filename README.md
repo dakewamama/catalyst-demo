@@ -1,13 +1,13 @@
 # Catalyst demo
 
-Scan an address, inspect its native authorization and compare two observed states.
+Velon: one view of what can act on a Solana wallet, read from native state.
 This is the Velon showcase. ARM, Cataloger and Catalyst keep their own repositories.
 
 The demo runs the pinned Cataloger CLI, imports accounts captured by executed native
 tests and serves its real journal API. The browser interprets ARM 0.1 responses.
 No balances, permissions or transaction outcomes are fabricated for the interface.
 
-![Scan showing native fixture authority, exact amounts and partial coverage](docs/scan.png)
+![Velon permission view over recorded native evidence](docs/scan.png)
 
 ## Run
 

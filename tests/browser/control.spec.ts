@@ -232,8 +232,8 @@ test("wallet signs exact revoke and success waits for finalized verification and
   await expect(page.getByRole("heading", { name: "You are removing" })).toBeInViewport();
   await page.screenshot({ path: `test-results/${info.project.name}-review.png`, fullPage: true });
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
-  await expect(page.getByRole("heading", { name: "FINALIZING", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "REVOKED", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Finalizing", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
   await expect(page.locator("#results article")).toHaveCount(0);
   await expect(page.locator("#action-result")).toContainText("Verified on chain (devnet).");
   await expect(page.locator("#action-result")).toContainText("c".repeat(64));
@@ -255,8 +255,8 @@ for (const mode of [
     const provider = await browserProvider(page, mode);
     await connectAndReview(page);
     await page.getByRole("button", { name: "Confirm in wallet" }).click();
-    await expect(page.getByRole("heading", { name: "FAILED", exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "REVOKED", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Not revoked", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toHaveCount(0);
     expect(provider.counts().sends).toBe(["verification-failed", "reapproved"].includes(mode) ? 1 : 0);
   });
 }
@@ -266,7 +266,7 @@ test("an unknown submission is settled by finalized verification, never resent",
   await connectAndReview(page);
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
   await expect(page.locator("#action-result")).toContainText("Submission response is uncertain");
-  await expect(page.getByRole("heading", { name: "REVOKED", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
   await expect(page.locator("#results article")).toHaveCount(0);
   expect(provider.counts()).toMatchObject({ sends: 1, polls: 2 });
 });
@@ -279,7 +279,7 @@ for (const [mode, reason] of [
   test(`no signing review opens: ${mode}`, async ({ page }) => {
     const provider = await browserProvider(page, mode);
     await connectAndReview(page);
-    await expect(page.getByRole("heading", { name: "FAILED", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Not revoked", exact: true })).toBeVisible();
     await expect(page.locator("#action-result")).toContainText(reason!);
     await expect(page.getByRole("dialog")).not.toBeVisible();
     expect(provider.counts().sends).toBe(0);

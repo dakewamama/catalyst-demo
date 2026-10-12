@@ -112,7 +112,7 @@ function showDetail(grant: ObjectValue, view: ObjectValue, availability: string)
   results.hidden = true;
   detail.hidden = false;
   detail.replaceChildren();
-  const back = node("button", "← Back to permissions", "link-button");
+  const back = node("button", "Back to permissions", "link-button");
   back.onclick = () => {
     detail.hidden = true;
     results.hidden = false;
@@ -125,7 +125,8 @@ function showDetail(grant: ObjectValue, view: ObjectValue, availability: string)
   const facts = node("dl", "", "facts");
   const usage = object(grant.usage);
   facts.append(
-    field("Resource", text(object(grant.resource).id)),
+    field("From", text(object(grant.resource).id)),
+    field("Native system", system(grant)),
     field("Enforcement", text(grant.enforcement)),
     field("Observability", text(grant.observability)),
     field("Lifecycle", text(object(grant.lifecycle).kind)),
@@ -169,6 +170,30 @@ function showDetail(grant: ObjectValue, view: ObjectValue, availability: string)
   );
 }
 
+const SYSTEMS: Record<string, string> = { "spl-token": "SPL Token", subscriptions: "Subscriptions" };
+
+function system(grant: ObjectValue): string {
+  const protocol = text(object(grant.native_context).protocol);
+  return SYSTEMS[protocol] ?? protocol;
+}
+
+function summary(permissions: { grant: ObjectValue }[], view: ObjectValue): HTMLElement {
+  const count = (matches: (grant: ObjectValue) => boolean) =>
+    String(permissions.filter(({ grant }) => matches(grant)).length);
+  const block = node("div", "", "summary");
+  for (const [value, label] of [
+    [count((grant) => object(grant.lifecycle).kind === "active"), "Active permissions"],
+    [count((grant) => object(grant.usage).kind === "recurring"), "Recurring permissions"],
+    [count((grant) => object(grant.authority_kind).kind === "administrative"), "Administrative authorities"],
+    [object(view.coverage).complete === true ? "Complete" : "Partial", "Coverage of this scan"],
+  ] as const) {
+    const tile = node("div");
+    tile.append(node("strong", value), node("span", label));
+    block.append(tile);
+  }
+  return block;
+}
+
 function card(grant: ObjectValue, view: ObjectValue, availability: string): HTMLElement {
   const row = node("article", "", "permission");
   const header = node("div", "", "permission-header");
@@ -176,15 +201,7 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string): HTML
     node("span", `${text(object(grant.authority_kind).kind)} authority`, "badge"),
     node("span", availability, "availability"),
   );
-  const principal = node("p", principalLabel(grant.principal), "address");
-  const button = node("button", "Inspect evidence →", "link-button");
-  button.onclick = () => showDetail(grant, view, availability);
-  row.append(
-    header,
-    node("h3", permissionLabel(grant)),
-    principal,
-    node("p", `Resource: ${text(object(grant.resource).id)}`, "address muted"),
-  );
+  row.append(header, node("h3", permissionLabel(grant)));
   const usage = object(grant.usage);
   if (usage.remaining !== undefined)
     row.append(
@@ -196,7 +213,17 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string): HTML
         "remaining",
       ),
     );
-  row.append(button);
+  const facts = node("dl");
+  facts.append(
+    field("Who", principalLabel(grant.principal)),
+    field("From", text(object(grant.resource).id)),
+    field("Native system", system(grant)),
+  );
+  const actions = node("div", "", "permission-actions");
+  const button = node("button", "View details", "link-button");
+  button.onclick = () => showDetail(grant, view, availability);
+  actions.append(button);
+  row.append(facts, actions);
   if (
     control &&
     currentScenario().live &&
@@ -212,7 +239,7 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string): HTML
   ) {
     const revoke = node("button", "Revoke", "action-button");
     revoke.onclick = () => void prepare(grant);
-    row.append(revoke);
+    actions.prepend(revoke);
   }
   return row;
 }
@@ -258,10 +285,10 @@ async function scan(historical = false, refresh = false) {
       ? control!.network === "devnet"
         ? "Devnet observation"
         : "Local validator"
-      : "Native fixture replay";
+      : "Recorded native evidence";
     document.querySelector(".scope-note")!.textContent = live
-      ? "These permissions come from a finalized observation of this token account. Coverage is partial; review checks must pass before signing."
-      : "This replay uses accounts captured from executed native tests. Coverage is partial. Every result is tied to an observed state.";
+      ? "Read from a finalized observation of this token account. Coverage is partial."
+      : "Read from accounts captured in executed native tests. Coverage is partial.";
     const path = historical
       ? `snapshots/${scenario.snapshots[0]!.id}/authorizations/${address}`
       : `scopes/${scenario.scope}/effective/${address}`;
@@ -292,7 +319,7 @@ async function scan(historical = false, refresh = false) {
       toggle.onclick = () => scan(!historical);
       heading.append(toggle);
     }
-    content.append(heading, metadata(view));
+    content.append(summary(permissions, view), heading, metadata(view));
     if (permissions.length === 0)
       content.append(
         node("p", "No matching authorizations in this observed scope. Coverage is partial.", "empty"),
@@ -399,7 +426,7 @@ function selectScenario() {
   const scenario = currentScenario();
   const examples = document.querySelector("#examples")!;
   examples.replaceChildren();
-  if (scenario.examples.length) examples.append(node("span", "Try a recorded address:", "muted"));
+  if (scenario.examples.length) examples.append(node("span", "Try", "muted"));
   for (const example of scenario.examples) {
     const button = node("button", example.label, "example");
     button.onclick = () => {
@@ -442,8 +469,10 @@ function refreshWallets() {
       return option;
     }),
   );
-  if (!available.length) walletChoice.append(node("option", "No signing wallet detected"));
+  walletChoice.hidden = available.length < 2 || !!connected;
+  connectButton.hidden = !!connected;
   connectButton.disabled = !available.length || !scenarios.length;
+  connectButton.title = available.length ? "" : "No Solana wallet with signTransaction was detected.";
 }
 wallets.on("register", refreshWallets);
 wallets.on("unregister", () => {
@@ -459,7 +488,8 @@ function disconnected() {
   unsubscribe = undefined;
   connected = undefined;
   disconnectButton.hidden = true;
-  walletStatus.textContent = "Wallet changed or disconnected. Connect again to review.";
+  walletStatus.textContent = "";
+  refreshWallets();
   if (actionState)
     setAction("FAILED", "Wallet changed. Any submitted transaction must still be checked on chain.");
   void scan();
@@ -467,7 +497,6 @@ function disconnected() {
 disconnectButton.onclick = () => {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
   disconnected();
-  walletStatus.textContent = "Disconnected.";
 };
 connectButton.onclick = async () => {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
@@ -485,8 +514,10 @@ connectButton.onclick = async () => {
     unsubscribe?.();
     connected = { wallet, account };
     unsubscribe = wallet.features["standard:events"].on("change", disconnected);
-    walletStatus.textContent = `${wallet.name}: ${account.address}`;
+    walletStatus.textContent = `${account.address.slice(0, 4)}…${account.address.slice(-4)}`;
+    walletStatus.title = `${wallet.name}: ${account.address}`;
     disconnectButton.hidden = false;
+    refreshWallets();
     const live = scenarios.findIndex((scenario) => scenario.live);
     if (live >= 0) {
       select.value = String(live);
@@ -500,10 +531,20 @@ connectButton.onclick = async () => {
   }
 };
 
+const STATES: Record<ActionState, string> = {
+  PREPARING: "Preparing",
+  SIMULATED: "Review",
+  AWAITING_SIGNATURE: "Waiting for wallet",
+  SUBMITTING: "Submitting",
+  FINALIZING: "Finalizing",
+  VERIFIED: "Revoked",
+  FAILED: "Not revoked",
+};
+
 function setAction(state: ActionState, message: string) {
   actionState = state;
   actionResult.hidden = false;
-  actionResult.replaceChildren(node("h2", state === "VERIFIED" ? "REVOKED" : state), node("p", message));
+  actionResult.replaceChildren(node("h2", STATES[state]), node("p", message));
   const busy = ["PREPARING", "AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(state);
   connectButton.disabled = busy;
   walletChoice.disabled = busy;
@@ -551,11 +592,11 @@ async function prepare(scanned: ObjectValue) {
     review.replaceChildren(title);
     const facts = node("dl", "", "facts");
     facts.append(
-      field("Principal", principalLabel(grant.principal)),
-      field("Capability", "Spend"),
-      field("Resource", source),
-      field("Limit", `${integer(object(grant.usage).remaining)} base units`),
-      field("Program", "SPL Token"),
+      field("Who", principalLabel(grant.principal)),
+      field("Can", "Spend"),
+      field("From", source),
+      field("Limit", `${integer(object(grant.usage).remaining).toLocaleString("en-US")} base units`),
+      field("Native system", system(grant)),
       field("Network", config.network === "devnet" ? "Devnet" : "Local validator"),
       field("Simulation", "Verified"),
       field("Deployment", "Verified"),
