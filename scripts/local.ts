@@ -149,6 +149,7 @@ try {
           "cargo",
           "run",
           "--quiet",
+          "--release",
           "--locked",
           "-p",
           "catalyst-indexer",
@@ -216,9 +217,11 @@ Run the demo in another terminal:
 
 RPC_URL=${url} PUBLIC_RPC_URL=${url} LIVE_NETWORK=localnet \\
 LIVE_CATALOG=${dir}/catalog.json LIVE_SOURCE=${source} \\
+LIVE_TEST_BENCH=1 AGAVE_BIN=${tools} \\
 CATALOGER_DIR=${cataloger} bun run demo
 
-This validator keeps running until interrupted. Rerun this script to reset the permission.`);
+This validator keeps running until interrupted. \`bun run local:reset\` approves the
+delegate again on this ledger; rerunning this script starts a new one.`);
   process.exitCode = await validator.exited;
 } catch (error) {
   await stop();

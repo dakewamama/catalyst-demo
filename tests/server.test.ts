@@ -134,9 +134,17 @@ test("action allowlist rejects invalid requests before contacting the runtime", 
 test("live observation passes one validated address and nothing else to the collector", async () => {
   const received: string[] = [];
   const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("unexpected") });
-  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, async (source) => {
-    received.push(source);
-    return new Response('{"scope_id":"s","record":{"slot":18446744073709551615}}');
+  let approvals = 0;
+  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, {
+    observe: async (source) => {
+      received.push(source);
+      return new Response(null, { status: 204 });
+    },
+    discover: async () => new Response("[]"),
+    approve: async () => {
+      approvals++;
+      return new Response(null, { status: 204 });
+    },
   });
   const disabled = createServer(String(upstream.url), [], 0);
   servers.push(upstream, server, disabled);
@@ -144,8 +152,7 @@ test("live observation passes one validated address and nothing else to the coll
   const headers = { "X-Velon-Action": "observe", "Content-Type": "application/json" };
   const post = (body: string, init: RequestInit = {}, target = server) =>
     fetch(new URL("/api/live/spl/observe", target.url), { method: "POST", headers, body, ...init });
-  const accepted = await post(JSON.stringify({ source }));
-  expect(await accepted.text()).toBe('{"scope_id":"s","record":{"slot":18446744073709551615}}');
+  expect((await post(JSON.stringify({ source }))).status).toBe(204);
   for (const body of [
     "",
     "not json",
@@ -171,6 +178,17 @@ test("live observation passes one validated address and nothing else to the coll
   expect((await fetch(new URL("/api/live/spl/observe", server.url))).status).toBe(405);
   expect((await post(JSON.stringify({ source }), {}, disabled)).status).toBe(404);
   expect(received).toEqual([source]);
+  // Discovery and the test bench exist only where the launcher wires them.
+  const route = (path: string, init?: RequestInit, target = server) => fetch(new URL(path, target.url), init);
+  expect(await (await route("/api/live/spl/delegated")).text()).toBe("[]");
+  expect((await route("/api/live/spl/delegated", {}, disabled)).status).toBe(404);
+  const test = { method: "POST", headers: { "X-Velon-Action": "test" } };
+  expect((await route("/api/live/spl/approve", test)).status).toBe(204);
+  expect((await route("/api/live/spl/approve", { ...test, body: "25" })).status).toBe(400);
+  expect((await route("/api/live/spl/approve", { method: "POST" })).status).toBe(403);
+  expect((await route("/api/live/spl/approve")).status).toBe(405);
+  expect((await route("/api/live/spl/approve", test, disabled)).status).toBe(404);
+  expect(approvals).toBe(1);
 });
 
 test("retained verification is read-only and forwards the exact evidence path", async () => {

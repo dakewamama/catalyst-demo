@@ -13,7 +13,13 @@ import {
   type ObjectValue,
 } from "./wire.ts";
 
-export type Control = { cluster: string; rpcUrl: string; network: "devnet" | "localnet" };
+export type Control = {
+  cluster: string;
+  rpcUrl: string;
+  network: "devnet" | "localnet";
+  /// The server can mint fresh test permissions on its disposable ledger.
+  testBench?: boolean;
+};
 export type ActionState =
   "PREPARING" | "SIMULATED" | "AWAITING_SIGNATURE" | "SUBMITTING" | "FINALIZING" | "VERIFIED" | "FAILED";
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";

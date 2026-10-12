@@ -77,6 +77,17 @@ export function principalLabel(value: Json | undefined): string {
   }
 }
 
+// Only exact calendar-like lengths get a name; anything else stays in seconds.
+function periodName(seconds: bigint): string {
+  const names: [bigint, string][] = [
+    [2592000n, "30 days"],
+    [604800n, "week"],
+    [86400n, "day"],
+    [3600n, "hour"],
+  ];
+  return names.find(([length]) => length === seconds)?.[1] ?? `${seconds.toLocaleString("en-US")} seconds`;
+}
+
 export function permissionLabel(grant: ObjectValue): string {
   const capability = text(grant.capability).replaceAll("_", " ");
   const verb = capability[0]!.toUpperCase() + capability.slice(1);
@@ -92,7 +103,7 @@ export function permissionLabel(grant: ObjectValue): string {
   if (amount < 0n || amount > 18446744073709551615n) throw new Error("Invalid native amount.");
   const period =
     usage.kind === "recurring"
-      ? ` every ${integer(usage.period_seconds).toLocaleString("en-US")} seconds`
+      ? ` every ${periodName(integer(usage.period_seconds))}`
       : usage.kind === "cumulative"
         ? " in total"
         : "";
@@ -142,4 +153,52 @@ export function compare(before: Json, after: Json): Change[] {
   }
   for (const [id, grant] of current) if (!previous.has(id)) changes.push({ kind: "added", after: grant });
   return changes;
+}
+
+// The runtime's evaluation in plain words; none of these promise a transfer will succeed.
+export const STATUS: Record<string, string> = {
+  conditional: "In force, within its limits",
+  inactive: "Not usable right now",
+  unknown: "Cannot be confirmed",
+};
+export const KINDS: Record<string, string> = {
+  direct: "Acts directly",
+  administrative: "Controls the rules",
+  derived: "Acts through another permission",
+};
+export const short = (address: string) => `${address.slice(0, 4)}…${address.slice(-4)}`;
+
+// One sentence a newcomer can read, built only from fields of the permission itself.
+export function meaning(grant: ObjectValue, viewer?: string): string {
+  const principal = object(grant.principal);
+  const who =
+    principal.kind === "identity" ? short(text(principal.value)) : "Any of the keys listed under Who";
+  const from = short(text(object(grant.resource).id));
+  // Tokens sit in a token account, not at the wallet address, so the owning wallet is named too.
+  const subject = object(grant.subject);
+  const owner =
+    subject.kind !== "identity"
+      ? ""
+      : subject.value === viewer
+        ? ", a token account your wallet owns,"
+        : `, a token account owned by wallet ${short(text(subject.value))},`;
+  switch (grant.capability) {
+    case "spend":
+      return `${who} can move tokens out of ${from}${owner} without asking again, up to the limit shown.`;
+    case "modify_authority":
+      return `${who} can change who is allowed to act on ${from}.`;
+    case "revoke_authority":
+      return `${who} can remove permissions on ${from}.`;
+    case "close":
+      return `${who} can close ${from} and collect what it holds in rent.`;
+    default:
+      return `${who} holds the "${text(grant.capability).replaceAll("_", " ")}" power over ${from}.`;
+  }
+}
+
+const SYSTEMS: Record<string, string> = { "spl-token": "SPL Token", subscriptions: "Subscriptions" };
+
+export function system(grant: ObjectValue): string {
+  const protocol = text(object(grant.native_context).protocol);
+  return SYSTEMS[protocol] ?? protocol;
 }

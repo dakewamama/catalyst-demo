@@ -15,14 +15,14 @@ Requirements: Bun 1.3.14 or newer, Node 22, npm, Git and stable Rust.
 
 ```sh
 git clone https://github.com/dakewamama/cataloger.git ../cataloger
-git -C ../cataloger checkout 37732273c0bf8f921155de11e7949d3888852aa6
+git -C ../cataloger checkout 3ececf3f1a88542f07af2fc770683a43c6caaa69
 npm ci --ignore-scripts
 bun run demo
 ```
 
 Open `http://127.0.0.1:3000`. For an existing checkout, set
 `CATALOGER_DIR=/absolute/path/to/cataloger`. Its tracked files must match the pinned
-revision. The first run builds `authorization-api`; later builds reuse Cargo's cache.
+revision. The first run builds `authorization-api` in release mode; later builds reuse Cargo's cache.
 The local fixture journal lives in ignored `.data/observations-{cataloger_revision}.db`.
 Each runtime pin gets its own journal so older projection evidence remains intact.
 No RPC credential is required for fixture replay.
@@ -120,6 +120,27 @@ LIVE_SOURCE=<optional-example-token-account> \
 CATALOGER_DIR=/absolute/path/to/cataloger bun run demo
 ```
 
+`/` is the product page and `/app` is the console. On a local validator the server
+also lists the token accounts the chain reports as delegated right now
+(`GET /api/live/spl/delegated`), which both pages poll; that list is discovery, and
+selecting an entry observes it through Cataloger before anything is shown as a
+permission. With `LIVE_TEST_BENCH=1` and `AGAVE_BIN` set, the console can approve a
+fresh delegate allowance for the local demo owner (`POST /api/live/spl/approve`), so a
+revoked permission can be recreated without leaving the page. The same switch lets a
+visitor test with their own key: `POST /api/test/account` sends a wallet SOL for fees
+and a token account with test tokens, the wallet then signs an ordinary SPL approval,
+and the revoke that follows goes through the full reviewed flow. "Use a test wallet"
+creates a throwaway key in the page for visitors with no extension. Verified revokes
+are kept in the browser and can be replayed from the journal under Receipts. These
+routes exist only for `LIVE_NETWORK=localnet`.
+
+Setting `MAINNET_RPC_URL` adds a read-only list of the newest token delegations on
+mainnet (`GET /api/mainnet/delegated`): the server reads recent finalized blocks for
+approve instructions and keeps up to five accounts whose delegate is still in force.
+These are shown as the RPC reports them and labelled as not verified; this runtime
+holds no mainnet evidence, so they cannot be observed as permissions or revoked. A
+provider URL with a key belongs in the environment only, never in the repository.
+
 `POST /api/live/spl/observe` accepts `{"source":"<token account>"}` and nothing else.
 The server validates the address, asks the RPC which owner and delegate accounts the
 token account names, and runs Cataloger's `observe` with one `spl_delegate` target and
@@ -152,20 +173,26 @@ The script checks the validator's revision, loads the token program and ProgramD
 from Cataloger's retained finalized mainnet capture, creates an owner, mint and token
 account, approves a delegate for 25 base units and writes the catalog with executable
 identity and runtime evidence for that genesis. It prints the launch command above.
-Rerun it to reset the permission. Then, with the demo running:
+`AGAVE_BIN=... bun run local:reset` approves the same delegate again on the running
+ledger, keeping earlier receipts and the journal. Rerunning `local` starts a new
+ledger and genesis, so the demo must be restarted with the newly printed command.
+Then, with the demo running:
 
 ```sh
 LIVE_OWNER_KEYPAIR=.data/local/owner.json RPC_URL=http://127.0.0.1:8899 npm run test:live
 ```
 
-That test mocks nothing. A browser signs with the owner key, the validator executes
-the revoke, and the test confirms the finalized transaction and the cleared delegate
-through RPC independently of the page.
+A browser signs with the owner key against the running validator. The test first
+rejects in the wallet, then returns a signature over altered bytes, and confirms
+that the page sent no transaction and the delegate is untouched both times. It then signs the reviewed
+bytes, the validator executes the revoke, and the test confirms the finalized
+transaction and the cleared delegate through RPC independently of the page.
 
 Devnet and mainnet currently run newer Agave releases than the pinned loader, so no
 catalog record can carry truthful runtime evidence for them and their observations
-stay incomplete. The other browser tests register an ephemeral wallet and use
-synthetic RPC responses; they prove browser conformance, not chain execution.
+stay incomplete. The control tests under `tests/browser` register an ephemeral
+wallet and use synthetic RPC responses; they prove browser conformance for failure
+cases that cannot be staged on a chain, not chain execution.
 
 ## Scope
 

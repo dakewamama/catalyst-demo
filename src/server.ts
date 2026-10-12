@@ -1,8 +1,20 @@
 import index from "./index.html";
+import app from "./console.html";
 import { isAddress } from "@solana/addresses";
 import type { Control } from "./control.ts";
 
-export type Observe = (source: string) => Promise<Response>;
+export type Live = {
+  observe?: (source: string) => Promise<Response>;
+  /// Recent mainnet delegations as its RPC reports them; read only and unverified.
+  mainnet?: () => Response;
+  devnet?: () => Response;
+  /// Lists delegated token accounts the cluster reports right now.
+  discover?: () => Promise<Response>;
+  /// Test bench only: approves a fresh delegate allowance on a disposable ledger.
+  approve?: () => Promise<Response>;
+  /// Test bench only: gives a visitor's wallet a funded token account on that ledger.
+  fund?: (owner: string) => Promise<Response>;
+};
 
 export function createServer(
   runtime: string,
@@ -10,14 +22,14 @@ export function createServer(
   port: number,
   hostname = "127.0.0.1",
   control: Control | null = null,
-  observe?: Observe,
+  live?: Live,
 ) {
   return Bun.serve({
     port,
     hostname,
     development: false,
     maxRequestBodySize: 4096,
-    routes: { "/": index },
+    routes: { "/": index, "/app": app },
     async fetch(request) {
       const url = new URL(request.url);
       if (url.search) return new Response("Not found", { status: 404 });
@@ -32,42 +44,66 @@ export function createServer(
       const receipt = /^\/api\/verifications\/revoke\/[a-f0-9]{64}$/.test(url.pathname);
       const scenariosPath = url.pathname === "/api/scenarios";
       const controlPath = url.pathname === "/api/control";
+      const observe = live?.observe;
       const observePath = observe && url.pathname === "/api/live/spl/observe";
+      const fund = url.pathname === "/api/test/account" ? live?.fund : undefined;
+      const discover = url.pathname === "/api/live/spl/delegated" ? live?.discover : undefined;
+      const approve = url.pathname === "/api/live/spl/approve" ? live?.approve : undefined;
+      const mainnet =
+        url.pathname === "/api/mainnet/delegated"
+          ? live?.mainnet
+          : url.pathname === "/api/devnet/delegated"
+            ? live?.devnet
+            : undefined;
       if (
-        (!match && !action && !receipt && !scenariosPath && !controlPath && !observePath) ||
+        (!match &&
+          !action &&
+          !receipt &&
+          !scenariosPath &&
+          !controlPath &&
+          !observePath &&
+          !fund &&
+          !discover &&
+          !approve &&
+          !mainnet) ||
         (match?.[4] && !isAddress(match[4])) ||
         (action && !isAddress(action[1]!))
       )
         return new Response("Not found", { status: 404 });
-      const method = action || observePath ? "POST" : "GET";
+      const method = action || observePath || approve || fund ? "POST" : "GET";
       if (request.method !== method)
         return new Response("Method not allowed", { status: 405, headers: { Allow: method } });
       if (scenariosPath) return Response.json(scenarios);
       if (controlPath) return Response.json(control, { headers: { "Cache-Control": "no-store" } });
+      if (discover) return discover();
+      if (mainnet) return mainnet();
       // Cross-origin browser requests cannot supply this header without a CORS preflight.
-      if (
-        request.method === "POST" &&
-        request.headers.get("X-Velon-Action") !== (action ? "revoke" : "observe")
-      )
+      const intent = action ? "revoke" : approve || fund ? "test" : "observe";
+      if (request.method === "POST" && request.headers.get("X-Velon-Action") !== intent)
         return new Response("Action header required", { status: 403 });
+      if (approve)
+        return (await request.arrayBuffer()).byteLength
+          ? new Response("Test approval takes no input", { status: 400 })
+          : approve();
       if (
-        (verify || observePath) &&
+        (verify || observePath || fund) &&
         request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() !== "application/json"
       )
         return new Response("JSON body required", { status: 415 });
-      if (observePath) {
-        // Only a validated address leaves this handler; the collector builds everything else.
-        let source: unknown;
+      if (observePath || fund) {
+        // Only a validated address leaves this handler; the launcher builds everything else.
+        const key = fund ? "owner" : "source";
+        let address: unknown;
         try {
           const input: unknown = JSON.parse(await request.text());
-          if (input && typeof input === "object" && Object.keys(input).join() === "source")
-            source = (input as { source: unknown }).source;
+          if (input && typeof input === "object" && Object.keys(input).join() === key)
+            address = (input as Record<string, unknown>)[key];
         } catch {
           /* Malformed JSON is rejected below. */
         }
-        if (typeof source !== "string" || !isAddress(source))
-          return new Response("Token account address required", { status: 400 });
-        return observe(source);
+        if (typeof address !== "string" || !isAddress(address))
+          return new Response("Address required", { status: 400 });
+        return fund ? fund(address) : observe!(address);
       }
       const body = action ? await request.arrayBuffer() : undefined;
       if (simulate && body!.byteLength)

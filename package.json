@@ -11,9 +11,12 @@
     "test": "bun test tests/*.test.ts",
     "test:e2e": "playwright test",
     "test:live": "playwright test --config playwright.live.config.ts",
-    "local": "bun scripts/local.ts"
+    "local": "bun scripts/local.ts",
+    "local:reset": "bun scripts/reset.ts"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
     "@solana/addresses": "8.4.0",
     "@solana/rpc": "8.4.0",
     "@solana/rpc-types": "8.4.0",

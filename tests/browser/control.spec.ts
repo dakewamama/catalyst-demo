@@ -218,7 +218,7 @@ async function browserProvider(page: Page, mode = "success") {
 }
 
 async function connectAndReview(page: Page) {
-  await page.goto("/");
+  await page.goto("/app");
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
   await page.getByRole("button", { name: "Revoke", exact: true }).click();
 }
@@ -255,9 +255,14 @@ for (const mode of [
     const provider = await browserProvider(page, mode);
     await connectAndReview(page);
     await page.getByRole("button", { name: "Confirm in wallet" }).click();
-    await expect(page.getByRole("heading", { name: "Not revoked", exact: true })).toBeVisible();
+    // After a send, failure to verify establishes nothing about the chain.
+    const sent = ["verification-failed", "reapproved"].includes(mode);
+    await expect(
+      page.getByRole("heading", { name: sent ? "Unconfirmed" : "Not submitted", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toHaveCount(0);
-    expect(provider.counts().sends).toBe(["verification-failed", "reapproved"].includes(mode) ? 1 : 0);
+    await expect(page.locator("#action-result dd")).toHaveCount(sent ? 1 : 0);
+    expect(provider.counts().sends).toBe(sent ? 1 : 0);
   });
 }
 
@@ -279,7 +284,7 @@ for (const [mode, reason] of [
   test(`no signing review opens: ${mode}`, async ({ page }) => {
     const provider = await browserProvider(page, mode);
     await connectAndReview(page);
-    await expect(page.getByRole("heading", { name: "Not revoked", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Not submitted", exact: true })).toBeVisible();
     await expect(page.locator("#action-result")).toContainText(reason!);
     await expect(page.getByRole("dialog")).not.toBeVisible();
     expect(provider.counts().sends).toBe(0);
